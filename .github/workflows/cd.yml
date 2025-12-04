@@ -1,15 +1,14 @@
 name: CD
 
 on:
-  release:
-    types:
-      - created
+  push:
+    tags:
+      - "v*"
 
 jobs:
   release:
     strategy:
-      fail-fast: false
-      # fail-fast: true
+      fail-fast: true
       matrix:
         platform:
           - os_name: Linux-x86_64
@@ -44,8 +43,9 @@ jobs:
       - name: Strip debug information
         run: strip target/${{ matrix.platform.target }}/release/pandora_launcher${{ matrix.platform.binext }}
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+      - name: Create release
+        uses: softprops/action-gh-release@v2
         with:
-          name: PandoraLauncher-${{ matrix.platform.os_name }}${{ matrix.platform.binext }}
-          path: target/${{ matrix.platform.target }}/release/pandora_launcher${{ matrix.platform.binext }}
+          files: target/${{ matrix.platform.target }}/release/pandora_launcher${{ matrix.platform.binext }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
