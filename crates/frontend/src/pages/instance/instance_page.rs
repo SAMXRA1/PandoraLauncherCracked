@@ -58,7 +58,7 @@ impl Render for InstancePage {
             InstanceSubpage::Quickplay(_) => 0,
             InstanceSubpage::Logs(_) => 1,
             InstanceSubpage::Mods(_) => 2,
-            InstanceSubpage::Settings(_) => 4,
+            InstanceSubpage::Settings(_) => 3,
         };
 
         let play_icon = Icon::empty().path("icons/play.svg");
@@ -98,14 +98,13 @@ impl Render for InstancePage {
                     .child(Tab::new().label("Quickplay"))
                     .child(Tab::new().label("Logs"))
                     .child(Tab::new().label("Mods"))
-                    .child(Tab::new().label("Resource Packs"))
                     .child(Tab::new().label("Settings"))
                     .on_click(cx.listener(|page, index, window, cx| {
                         let page_type = match *index {
                             0 => InstanceSubpageType::Quickplay,
                             1 => InstanceSubpageType::Logs,
                             2 => InstanceSubpageType::Mods,
-                            4 => InstanceSubpageType::Settings,
+                            3 => InstanceSubpageType::Settings,
                             _ => {
                                 return;
                             },
