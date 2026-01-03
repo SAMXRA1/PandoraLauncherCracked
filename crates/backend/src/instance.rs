@@ -12,7 +12,7 @@ use bridge::{
     }, keep_alive::{KeepAlive, KeepAliveHandle}, message::{AtomicBridgeDataLoadState, BridgeDataLoadState, MessageToFrontend}, notify_signal::{KeepAliveNotifySignal, KeepAliveNotifySignalHandle, NotifySignal}, serial::Serial
 };
 use parking_lot::{RwLock, RwLockWriteGuard};
-use schema::loader::Loader;
+use schema::{instance::InstanceConfiguration, loader::Loader};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::task::JoinHandle;
@@ -30,8 +30,7 @@ pub struct Instance {
     pub saves_path: Arc<Path>,
     pub mods_path: Arc<Path>,
     pub name: Ustr,
-    pub version: Ustr,
-    pub loader: Loader,
+    pub configuration: InstanceConfiguration,
 
     pub child: Option<Child>,
 
@@ -73,13 +72,6 @@ impl GetId for Instance {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct BasicInstanceInfo {
-    pub name: Ustr,
-    pub version: Ustr,
-    pub loader: Loader,
-}
-
 #[derive(Error, Debug)]
 pub enum InstanceLoadError {
     #[error("Not a directory")]
@@ -106,14 +98,6 @@ impl Instance {
         self.server_dat_path = server_dat_path.into();
         self.saves_path = saves_path.into();
         self.mods_path = mods_path.into();
-    }
-
-    pub fn as_basic_info(&self) -> BasicInstanceInfo {
-        BasicInstanceInfo {
-            name: self.name,
-            version: self.version,
-            loader: self.loader,
-        }
     }
 
     pub fn try_get_mod(&self, id: InstanceModID) -> Option<&InstanceModSummary> {
@@ -554,7 +538,7 @@ impl Instance {
         let info_path = path.join("info_v1.json");
         let file = tokio::fs::read(&info_path).await?;
 
-        let instance_info: InstanceInfo = serde_json::from_slice(&file)?;
+        let instance_info: InstanceConfiguration = serde_json::from_slice(&file)?;
 
         let mut dot_minecraft_path = path.to_owned();
         dot_minecraft_path.push(".minecraft");
@@ -571,8 +555,7 @@ impl Instance {
             saves_path: saves_path.into(),
             mods_path: mods_path.into(),
             name: path.file_name().unwrap().to_string_lossy().into_owned().into(),
-            version: instance_info.minecraft_version,
-            loader: instance_info.loader,
+            configuration: instance_info,
 
             child: None,
 
@@ -675,8 +658,7 @@ impl Instance {
 
         self.root_path = new.root_path;
         self.name = new.name;
-        self.version = new.version;
-        self.loader = new.loader;
+        self.configuration = new.configuration.clone();
     }
 
     pub fn status(&self) -> InstanceStatus {
@@ -696,8 +678,7 @@ impl Instance {
             id: self.id,
             name: self.name,
             dot_minecraft_folder: self.dot_minecraft_path.clone(),
-            version: self.version,
-            loader: self.loader,
+            configuration: self.configuration.clone(),
             status,
         }
     }
@@ -768,12 +749,6 @@ fn read_disabled_children_for(path: &Path) -> Option<HashSet<String>> {
     file.read_to_string(&mut string).ok()?;
 
     Some(string.split_terminator('\n').map(str::to_string).collect())
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct InstanceInfo {
-    pub minecraft_version: Ustr,
-    pub loader: Loader,
 }
 
 fn load_world_summary(path: &Path) -> anyhow::Result<InstanceWorldSummary> {

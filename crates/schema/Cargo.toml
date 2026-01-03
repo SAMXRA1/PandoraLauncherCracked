@@ -8,6 +8,7 @@ chrono.workspace = true
 indexmap.workspace = true
 serde.workspace = true
 serde-untagged.workspace = true
+serde_json.workspace = true
 ustr.workspace = true
 thiserror.workspace = true
 enumset.workspace = true

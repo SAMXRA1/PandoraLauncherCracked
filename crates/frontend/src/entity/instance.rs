@@ -7,7 +7,7 @@ use bridge::{
 use gpui::{prelude::*, *};
 use gpui_component::select::SelectItem;
 use indexmap::IndexMap;
-use schema::loader::Loader;
+use schema::{instance::InstanceConfiguration, loader::Loader};
 
 pub struct InstanceEntries {
     pub entries: IndexMap<InstanceID, Entity<InstanceEntry>>,
@@ -19,8 +19,7 @@ impl InstanceEntries {
         id: InstanceID,
         name: SharedString,
         dot_minecraft_folder: Arc<Path>,
-        version: SharedString,
-        loader: Loader,
+        configuration: InstanceConfiguration,
         worlds_state: Arc<AtomicBridgeDataLoadState>,
         servers_state: Arc<AtomicBridgeDataLoadState>,
         mods_state: Arc<AtomicBridgeDataLoadState>,
@@ -31,8 +30,7 @@ impl InstanceEntries {
                 id,
                 name,
                 dot_minecraft_folder,
-                version,
-                loader,
+                configuration,
                 status: InstanceStatus::NotRunning,
                 worlds_state,
                 worlds: cx.new(|_| [].into()),
@@ -76,8 +74,7 @@ impl InstanceEntries {
         id: InstanceID,
         name: SharedString,
         dot_minecraft_folder: Arc<Path>,
-        version: SharedString,
-        loader: Loader,
+        configuration: InstanceConfiguration,
         status: InstanceStatus,
         cx: &mut App,
     ) {
@@ -86,8 +83,7 @@ impl InstanceEntries {
                 let cloned = instance.update(cx, |instance, cx| {
                     instance.name = name.clone();
                     instance.dot_minecraft_folder = dot_minecraft_folder.clone();
-                    instance.version = version.clone();
-                    instance.loader = loader;
+                    instance.configuration = configuration.clone();
                     instance.status = status;
                     cx.notify();
 
@@ -166,8 +162,7 @@ pub struct InstanceEntry {
     pub id: InstanceID,
     pub name: SharedString,
     pub dot_minecraft_folder: Arc<Path>,
-    pub version: SharedString,
-    pub loader: Loader,
+    pub configuration: InstanceConfiguration,
     pub status: InstanceStatus,
     pub worlds_state: Arc<AtomicBridgeDataLoadState>,
     pub worlds: Entity<Arc<[InstanceWorldSummary]>>,
@@ -197,16 +192,16 @@ impl PartialEq for InstanceEntry {
 
 impl InstanceEntry {
     pub fn title(&self) -> String {
-        if self.name == self.version {
-            if self.loader == Loader::Vanilla {
+        if self.name == &*self.configuration.minecraft_version {
+            if self.configuration.loader == Loader::Vanilla {
                 format!("{}", self.name)
             } else {
-                format!("{} ({:?})", self.name, self.loader)
+                format!("{} ({:?})", self.name, self.configuration.loader)
             }
-        } else if self.loader == Loader::Vanilla {
-            format!("{} ({})", self.name, self.version)
+        } else if self.configuration.loader == Loader::Vanilla {
+            format!("{} ({})", self.name, self.configuration.minecraft_version)
         } else {
-            format!("{} ({:?} {})", self.name, self.loader, self.version)
+            format!("{} ({:?} {})", self.name, self.configuration.loader, self.configuration.minecraft_version)
         }
     }
 }

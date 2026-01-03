@@ -15,20 +15,16 @@ use bridge::{
 use futures::{FutureExt, TryFutureExt};
 use regex::Regex;
 use schema::{
-    assets_index::AssetsIndex,
-    fabric_launch::FabricLaunch,
-    java_runtime_component::{JavaRuntimeComponentFile, JavaRuntimeComponentManifest},
-    loader::Loader,
-    version::{
+    assets_index::AssetsIndex, fabric_launch::FabricLaunch, instance::InstanceConfiguration, java_runtime_component::{JavaRuntimeComponentFile, JavaRuntimeComponentManifest}, loader::Loader, version::{
         GameLibrary, GameLibraryArtifact, GameLibraryDownloads, GameLibraryExtractOptions, GameLogging, LaunchArgument,
         LaunchArgumentValue, MinecraftVersion, OsArch, OsName, Rule, RuleAction,
-    },
+    }
 };
 use sha1::{Digest, Sha1};
 use ustr::Ustr;
 
 use crate::{
-    account::MinecraftLoginInfo, directories::LauncherDirectories, install_content, instance::{BasicInstanceInfo, Instance}, launch_wrapper, metadata::{items::{AssetsIndexMetadataItem, FabricLaunchMetadataItem, FabricLoaderManifestMetadataItem, MinecraftVersionManifestMetadataItem, MinecraftVersionMetadataItem, MojangJavaRuntimeComponentMetadataItem, MojangJavaRuntimesMetadataItem}, manager::{
+    account::MinecraftLoginInfo, directories::LauncherDirectories, install_content, launch_wrapper, metadata::{items::{AssetsIndexMetadataItem, FabricLaunchMetadataItem, FabricLoaderManifestMetadataItem, MinecraftVersionManifestMetadataItem, MinecraftVersionMetadataItem, MojangJavaRuntimeComponentMetadataItem, MojangJavaRuntimesMetadataItem}, manager::{
         MetaLoadError, MetadataManager,
     }}
 };
@@ -72,7 +68,8 @@ impl Launcher {
     pub async fn launch(
         &self,
         http_client: &reqwest::Client,
-        instance_info: BasicInstanceInfo,
+        dot_minecraft_path: Arc<Path>,
+        instance_info: InstanceConfiguration,
         quick_play: Option<QuickPlayLaunch>,
         login_info: MinecraftLoginInfo,
         add_mods: Vec<PathBuf>,
@@ -82,7 +79,7 @@ impl Launcher {
         launch_tracker.set_total(6);
 
         let version_info = tokio::select! {
-            result = self.create_launch_version(launch_tracker, instance_info) => result?,
+            result = self.create_launch_version(launch_tracker, &instance_info) => result?,
             _ = modal_action.request_cancel.cancelled() => {
                 self.sender.send(MessageToFrontend::CloseModal);
                 return Err(LaunchError::CancelledByUser);
@@ -92,14 +89,7 @@ impl Launcher {
         launch_tracker.add_count(1);
         launch_tracker.notify();
 
-        let instance_name = instance_info.name.as_str();
-        if !crate::is_single_component_path(instance_name) {
-            return Err(LaunchError::InvalidInstanceName(instance_name));
-        }
-
-        let instance_dir = self.directories.instances_dir.join(instance_name);
-        let game_dir = instance_dir.join(".minecraft");
-        let _ = std::fs::create_dir_all(&game_dir);
+        let _ = std::fs::create_dir_all(&dot_minecraft_path);
 
         let launch_rule_context = LaunchRuleContext {
             is_demo_user: false,
@@ -117,7 +107,7 @@ impl Launcher {
 
         let client_download = &version_info.downloads.client;
         artifacts.push(GameLibraryArtifact {
-            path: format!("net/minecraft/{}/minecraft-client-{}.jar", instance_info.version, instance_info.version).into(),
+            path: format!("net/minecraft/{}/minecraft-client-{}.jar", instance_info.minecraft_version, instance_info.minecraft_version).into(),
             sha1: Some(client_download.sha1),
             size: Some(client_download.size),
             url: client_download.url,
@@ -131,7 +121,7 @@ impl Launcher {
             launch_tracker,
         );
         let load_assets_future =
-            self.load_assets(&self.meta, http_client, &game_dir, &version_info, &modal_action.trackers, launch_tracker);
+            self.load_assets(&self.meta, http_client, &dot_minecraft_path, &version_info, &modal_action.trackers, launch_tracker);
         let load_libraries_future =
             self.load_libraries(http_client, &artifacts, &modal_action.trackers, launch_tracker);
         let load_log_configuration = self.load_log_configuration(http_client, version_info.logging.as_ref());
@@ -199,7 +189,7 @@ impl Launcher {
         let launch_context = LaunchContext {
             java_path,
             natives_dir,
-            game_dir,
+            game_dir: dot_minecraft_path,
             assets_root: self.directories.assets_root_dir.clone(),
             temp_dir: self.directories.temp_dir.clone(),
             assets_index_name,
@@ -225,7 +215,7 @@ impl Launcher {
     async fn create_launch_version(
         &self,
         launch_tracker: &ProgressTracker,
-        instance_info: BasicInstanceInfo,
+        instance_info: &InstanceConfiguration,
     ) -> Result<Arc<MinecraftVersion>, LaunchError> {
         match instance_info.loader {
             Loader::Vanilla => {
@@ -237,8 +227,8 @@ impl Launcher {
                 launch_tracker.add_count(1);
                 launch_tracker.notify();
 
-                let Some(version) = versions.versions.iter().find(|v| v.id == instance_info.version) else {
-                    return Err(LaunchError::CantFindVersion(instance_info.version.as_str()));
+                let Some(version) = versions.versions.iter().find(|v| v.id == instance_info.minecraft_version) else {
+                    return Err(LaunchError::CantFindVersion(instance_info.minecraft_version.as_str()));
                 };
 
                 Ok(self.meta.fetch(&MinecraftVersionMetadataItem(version)).await?)
@@ -253,7 +243,7 @@ impl Launcher {
 
                 let launch_tracker2 = launch_tracker.clone();
                 let meta2 = Arc::clone(&self.meta);
-                let minecraft_version = instance_info.version;
+                let minecraft_version = instance_info.minecraft_version;
                 let fabric_launch = fabric_loader_versions.and_then(async move |loader_manifest| {
                     launch_tracker2.add_count(1);
                     launch_tracker2.notify();
@@ -276,7 +266,7 @@ impl Launcher {
 
                 let launch_tracker3 = launch_tracker.clone();
                 let meta3 = Arc::clone(&self.meta);
-                let instance_version = instance_info.version;
+                let instance_version = instance_info.minecraft_version;
                 let version = versions.and_then(async move |versions| {
                     launch_tracker3.add_count(1);
                     launch_tracker3.notify();
@@ -450,7 +440,7 @@ impl Launcher {
         &self,
         meta: &MetadataManager,
         http_client: &reqwest::Client,
-        game_dir: &PathBuf,
+        game_dir: &Arc<Path>,
         version_info: &MinecraftVersion,
         progress_trackers: &ProgressTrackers,
         launch_tracker: &ProgressTracker,
@@ -1363,7 +1353,7 @@ impl LaunchRuleContext {
 pub struct LaunchContext {
     pub java_path: PathBuf,
     pub natives_dir: PathBuf,
-    pub game_dir: PathBuf,
+    pub game_dir: Arc<Path>,
     pub assets_root: Arc<Path>,
     pub temp_dir: Arc<Path>,
     pub assets_index_name: String,

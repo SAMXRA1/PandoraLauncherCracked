@@ -1,6 +1,7 @@
 use std::{collections::{HashMap, HashSet}, path::Path, sync::{atomic::AtomicBool, Arc}};
 
 use schema::{loader::Loader, modification::ModrinthModpackFileDownload};
+use ustr::Ustr;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct InstanceID {

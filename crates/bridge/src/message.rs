@@ -1,7 +1,7 @@
 use std::{ffi::OsString, path::{Path, PathBuf}, sync::Arc};
 
 use enumset::{EnumSet, EnumSetType};
-use schema::loader::Loader;
+use schema::{instance::InstanceConfiguration, loader::Loader};
 use ustr::Ustr;
 use uuid::Uuid;
 
@@ -109,8 +109,7 @@ pub enum MessageToFrontend {
         id: InstanceID,
         name: Ustr,
         dot_minecraft_folder: Arc<Path>,
-        version: Ustr,
-        loader: Loader,
+        configuration: InstanceConfiguration,
         worlds_state: Arc<AtomicBridgeDataLoadState>,
         servers_state: Arc<AtomicBridgeDataLoadState>,
         mods_state: Arc<AtomicBridgeDataLoadState>,
@@ -122,8 +121,7 @@ pub enum MessageToFrontend {
         id: InstanceID,
         name: Ustr,
         dot_minecraft_folder: Arc<Path>,
-        version: Ustr,
-        loader: Loader,
+        configuration: InstanceConfiguration,
         status: InstanceStatus,
     },
     InstanceWorldsUpdated {

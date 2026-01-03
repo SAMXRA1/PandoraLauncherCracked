@@ -103,8 +103,8 @@ impl TableDelegate for InstanceList {
                     _ => lexical_sort::natural_lexical_cmp(&a.name, &b.name),
                 }),
                 "version" => self.items.sort_by(|a, b| match sort {
-                    ColumnSort::Descending => lexical_sort::natural_lexical_cmp(&a.version, &b.version).reverse(),
-                    _ => lexical_sort::natural_lexical_cmp(&a.version, &b.version),
+                    ColumnSort::Descending => lexical_sort::natural_lexical_cmp(&a.configuration.minecraft_version, &b.configuration.minecraft_version).reverse(),
+                    _ => lexical_sort::natural_lexical_cmp(&a.configuration.minecraft_version, &b.configuration.minecraft_version),
                 }),
                 _ => {},
             }
@@ -116,7 +116,7 @@ impl TableDelegate for InstanceList {
         if let Some(col) = self.columns.get(col_ix) {
             match col.key.as_ref() {
                 "name" => item.name.clone().into_any_element(),
-                "version" => item.version.clone().into_any_element(),
+                "version" => item.configuration.minecraft_version.as_str().into_any_element(),
                 "controls" => {
                     let backend_handle = self.backend_handle.clone();
                     h_flex()
@@ -138,7 +138,7 @@ impl TableDelegate for InstanceList {
                         }))
                         .into_any_element()
                 },
-                "loader" => item.loader.name().into_any_element(),
+                "loader" => item.configuration.loader.name().into_any_element(),
                 _ => "Unknown".into_any_element(),
             }
         } else {

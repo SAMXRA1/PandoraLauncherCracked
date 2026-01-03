@@ -17,14 +17,14 @@ use image::imageops::FilterType;
 use parking_lot::RwLock;
 use reqwest::{StatusCode, redirect::Policy};
 use rustc_hash::FxHashMap;
-use schema::{loader::Loader, modrinth::ModrinthSideRequirement};
+use schema::{instance::InstanceConfiguration, loader::Loader, modrinth::ModrinthSideRequirement};
 use sha1::{Digest, Sha1};
 use tokio::sync::{mpsc::Receiver, OnceCell};
 use ustr::Ustr;
 use uuid::Uuid;
 
 use crate::{
-    account::BackendAccountInfo, config::BackendConfig, directories::LauncherDirectories, id_slab::IdSlab, instance::{Instance, InstanceInfo}, launch::Launcher, metadata::{items::MinecraftVersionManifestMetadataItem, manager::MetadataManager}, mod_metadata::ModMetadataManager, persistent::Persistent
+    account::BackendAccountInfo, config::BackendConfig, directories::LauncherDirectories, id_slab::IdSlab, instance::Instance, launch::Launcher, metadata::{items::MinecraftVersionManifestMetadataItem, manager::MetadataManager}, mod_metadata::ModMetadataManager, persistent::Persistent
 };
 
 pub fn start(launcher_dir: PathBuf, send: FrontendHandle, self_handle: BackendHandle, recv: BackendReceiver) {
@@ -289,8 +289,7 @@ impl BackendState {
                 id: instance.id,
                 name: instance.name,
                 dot_minecraft_folder: instance.dot_minecraft_path.clone(),
-                version: instance.version,
-                loader: instance.loader,
+                configuration: instance.configuration.clone(),
                 worlds_state: Arc::clone(&instance.worlds_state),
                 servers_state: Arc::clone(&instance.servers_state),
                 mods_state: Arc::clone(&instance.mods_state),
@@ -904,13 +903,14 @@ impl BackendState {
 
         let _ = tokio::fs::create_dir_all(&instance_dir).await;
 
-        let instance_info = InstanceInfo {
+        let instance_info = InstanceConfiguration {
             minecraft_version: Ustr::from(version),
             loader,
+            memory: None,
         };
 
         let info_path = instance_dir.join("info_v1.json");
-        tokio::fs::write(info_path, serde_json::to_string_pretty(&instance_info).unwrap()).await.unwrap();
+        crate::write_safe(&info_path, serde_json::to_string_pretty(&instance_info).unwrap().as_bytes()).unwrap();
 
         Some(instance_dir.clone())
     }

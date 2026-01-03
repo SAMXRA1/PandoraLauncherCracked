@@ -426,11 +426,9 @@ struct ModrinthIndexJson {
     files: Arc<[ModrinthModpackFileDownload]>,
 
     // Unofficial
-    #[serde(default)]
-    #[serde(deserialize_with = "skip_if_deserialization_fails")]
+    #[serde(default, deserialize_with = "schema::try_deserialize")]
     authors: Option<Vec<Person>>,
-    #[serde(default)]
-    #[serde(deserialize_with = "skip_if_deserialization_fails")]
+    #[serde(default, deserialize_with = "schema::try_deserialize")]
     author: Option<Person>,
 }
 
@@ -465,16 +463,5 @@ impl<'de> DeserializeAs<'de, [u8; 20]> for DeserializeAsHex {
     where
         D: serde::Deserializer<'de> {
         hex::serde::deserialize(deserializer)
-    }
-}
-
-fn skip_if_deserialization_fails<'de, T, D>(deserializer: D) -> Result<Option<T>, D::Error>
-where
-    T: Deserialize<'de>,
-    D: serde::Deserializer<'de>,
-{
-    match T::deserialize(deserializer) {
-        Ok(value) => Ok(Some(value)),
-        Err(_) => Ok(None),
     }
 }

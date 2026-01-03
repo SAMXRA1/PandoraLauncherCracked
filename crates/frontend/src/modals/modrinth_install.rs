@@ -50,7 +50,7 @@ struct InstallDialog {
     last_selected_minecraft_version: Option<SharedString>,
     last_selected_loader: Option<SharedString>,
 
-    fixed_minecraft_version: Option<SharedString>,
+    fixed_minecraft_version: Option<&'static str>,
     minecraft_version_select_state: Option<Entity<SelectState<SearchableVec<SharedString>>>>,
 
     fixed_loader: Option<ModrinthLoader>,
@@ -158,31 +158,35 @@ fn open_from_entity(
 
                 let instance = instance.read(cx);
 
-                let Some(loaders) = version_matrix.get(instance.version.as_str()) else {
-                    let error_message = SharedString::from(&format!("No mod versions found for {}", instance.version));
+                let minecraft_version = instance.configuration.minecraft_version.as_str();
+                let instance_loader = instance.configuration.loader;
+
+                let Some(loaders) = version_matrix.get(minecraft_version) else {
+                    let error_message = SharedString::from(&format!("No mod versions found for {}", minecraft_version));
                     open_error_dialog(title.clone(), error_message, window, cx);
                     return;
                 };
 
                 let mut valid_loader = true;
                 if project_type == ModrinthProjectType::Mod || project_type == ModrinthProjectType::Modpack {
-                    valid_loader = instance.loader == Loader::Vanilla
-                        || loaders.loaders.contains(instance.loader.as_modrinth_loader());
+                    valid_loader = instance_loader == Loader::Vanilla
+                        || loaders.loaders.contains(instance_loader.as_modrinth_loader());
                 }
                 if !valid_loader {
-                    let error_message = SharedString::from(&format!("No mod versions found for {} {}", instance.loader.name(), instance.version));
+                    let error_message = SharedString::from(&format!("No mod versions found for {} {}",
+                        instance_loader.name(), minecraft_version));
                     open_error_dialog(title.clone(), error_message, window, cx);
                     return;
                 }
 
                 let title = title.clone();
                 let instance_id = instance.id;
-                let fixed_minecraft_version = Some(instance.version.clone());
+                let fixed_minecraft_version = Some(minecraft_version);
                 let fixed_loader = if (project_type == ModrinthProjectType::Mod
                     || project_type == ModrinthProjectType::Modpack)
-                    && instance.loader != Loader::Vanilla
+                    && instance_loader != Loader::Vanilla
                 {
-                    Some(instance.loader.as_modrinth_loader())
+                    Some(instance_loader.as_modrinth_loader())
                 } else {
                     None
                 };
@@ -217,11 +221,14 @@ fn open_from_entity(
                     .filter_map(|(_, instance)| {
                         let instance = instance.read(cx);
 
-                        if let Some(loaders) = version_matrix.get(instance.version.as_str()) {
+                        let minecraft_version = instance.configuration.minecraft_version.as_str();
+                        let instance_loader = instance.configuration.loader;
+
+                        if let Some(loaders) = version_matrix.get(minecraft_version) {
                             let mut valid_loader = true;
                             if project_type == ModrinthProjectType::Mod || project_type == ModrinthProjectType::Modpack {
-                                valid_loader = instance.loader == Loader::Vanilla
-                                    || loaders.loaders.contains(instance.loader.as_modrinth_loader());
+                                valid_loader = instance_loader == Loader::Vanilla
+                                    || loaders.loaders.contains(instance_loader.as_modrinth_loader());
                             }
                             if valid_loader {
                                 return Some(instance.clone());
@@ -324,12 +331,12 @@ impl InstallDialog {
                             dialog.child(Button::new("instance").success().h_full().label("Add to instance").on_click(
                                 cx.listener(move |this, _, _, _| {
                                     this.target = Some(InstallTarget::Instance(instance.id));
-                                    this.fixed_minecraft_version = Some(instance.version.clone());
+                                    this.fixed_minecraft_version = Some(instance.configuration.minecraft_version.as_str());
                                     if (this.project_type == ModrinthProjectType::Mod
                                         || this.project_type == ModrinthProjectType::Modpack)
-                                        && instance.loader != Loader::Vanilla
+                                        && instance.configuration.loader != Loader::Vanilla
                                     {
-                                        this.fixed_loader = Some(instance.loader.as_modrinth_loader());
+                                        this.fixed_loader = Some(instance.configuration.loader.as_modrinth_loader());
                                     }
                                 }),
                             ))
@@ -354,7 +361,7 @@ impl InstallDialog {
             if let Some(minecraft_version) = self.fixed_minecraft_version.clone() {
                 self.minecraft_version_select_state = Some(cx.new(|cx| {
                     let mut select_state =
-                        SelectState::new(SearchableVec::new(vec![minecraft_version]), None, window, cx)
+                        SelectState::new(SearchableVec::new(vec![SharedString::new_static(minecraft_version)]), None, window, cx)
                             .searchable(true);
                     select_state.set_selected_index(Some(IndexPath::default()), window, cx);
                     select_state

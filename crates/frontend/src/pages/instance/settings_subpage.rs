@@ -7,7 +7,7 @@ use bridge::{
 };
 use gpui::{prelude::*, *};
 use gpui_component::{
-    button::{Button, ButtonVariants}, h_flex, input::{Input, InputEvent, InputState}, list::{ListDelegate, ListItem, ListState}, select::{Select, SelectEvent, SelectState}, spinner::Spinner, switch::Switch, v_flex, ActiveTheme as _, Icon, IconName, IndexPath, Sizable
+    button::{Button, ButtonVariants}, checkbox::Checkbox, h_flex, input::{Input, InputEvent, InputState, NumberInput, NumberInputEvent}, list::{ListDelegate, ListItem, ListState}, select::{Select, SelectEvent, SelectState}, spinner::Spinner, switch::Switch, v_flex, ActiveTheme as _, Disableable, Icon, IconName, IndexPath, Sizable
 };
 use rustc_hash::FxHashSet;
 
@@ -23,6 +23,8 @@ enum NewNameChangeState {
 pub struct InstanceSettingsSubpage {
     instance: Entity<InstanceEntry>,
     new_name_input_state: Entity<InputState>,
+    memory_min_input_state: Entity<InputState>,
+    memory_max_input_state: Entity<InputState>,
     new_name_change_state: NewNameChangeState,
     backend_handle: BackendHandle,
 }
@@ -35,12 +37,18 @@ impl InstanceSettingsSubpage {
         cx: &mut gpui::Context<Self>,
     ) -> Self {
         let new_name_input_state = cx.new(|cx| InputState::new(window, cx));
-
         cx.subscribe(&new_name_input_state, Self::on_new_name_input).detach();
+
+        let memory_min_input_state = cx.new(|cx| InputState::new(window, cx).default_value("512"));
+        cx.subscribe_in(&memory_min_input_state, window, Self::on_memory_step).detach();
+        let memory_max_input_state = cx.new(|cx| InputState::new(window, cx).default_value("4096"));
+        cx.subscribe_in(&memory_max_input_state, window, Self::on_memory_step).detach();
 
         Self {
             instance: instance.clone(),
             new_name_input_state,
+            memory_min_input_state,
+            memory_max_input_state,
             new_name_change_state: NewNameChangeState::NoChange,
             backend_handle,
         }
@@ -75,6 +83,36 @@ impl InstanceSettingsSubpage {
             self.new_name_change_state = NewNameChangeState::Pending;
         }
     }
+
+
+    pub fn on_memory_step(
+        &mut self,
+        state: &Entity<InputState>,
+        event: &NumberInputEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            NumberInputEvent::Step(step_action) => match step_action {
+                gpui_component::input::StepAction::Decrement => {
+                    if let Ok(mut value) = state.read(cx).value().parse::<usize>() {
+                        value = value.saturating_div(256).saturating_sub(1).saturating_mul(256).max(128);
+                        state.update(cx, |input, cx| {
+                            input.set_value(value.to_string(), window, cx);
+                        })
+                    }
+                },
+                gpui_component::input::StepAction::Increment => {
+                    if let Ok(mut value) = state.read(cx).value().parse::<usize>() {
+                        value = value.saturating_div(256).saturating_add(1).saturating_mul(256).max(128);
+                        state.update(cx, |input, cx| {
+                            input.set_value(value.to_string(), window, cx);
+                        })
+                    }
+                },
+            },
+        }
+    }
 }
 
 impl Render for InstanceSettingsSubpage {
@@ -89,7 +127,7 @@ impl Render for InstanceSettingsSubpage {
 
         let content = v_flex()
             .p_4()
-            .gap_2()
+            .gap_4()
             .child(v_flex()
                 .child("Instance name")
                 .child(h_flex()
@@ -116,6 +154,11 @@ impl Render for InstanceSettingsSubpage {
                     })
                 )
             )
+            .child(v_flex()
+                .gap_1()
+                .child(Checkbox::new("memory").label("Memory").checked(false))
+                .child(NumberInput::new(&self.memory_min_input_state).w_64().small().suffix("MiB").disabled(true))
+                .child(NumberInput::new(&self.memory_max_input_state).w_64().small().suffix("MiB").disabled(true)))
             .child(Button::new("delete").w_64().label("Delete this instance").danger().on_click({
                 let instance = self.instance.clone();
                 let backend_handle = self.backend_handle.clone();

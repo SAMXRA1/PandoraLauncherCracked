@@ -10,7 +10,7 @@ use serde::Deserialize;
 use tokio::{io::AsyncBufReadExt, sync::Semaphore};
 
 use crate::{
-    account::{BackendAccount, MinecraftLoginInfo}, arcfactory::ArcStrFactory, instance::InstanceInfo, launch::{ArgumentExpansionKey, LaunchError}, log_reader, metadata::{items::{AssetsIndexMetadataItem, MinecraftVersionManifestMetadataItem, MinecraftVersionMetadataItem, ModrinthProjectVersionsMetadataItem, ModrinthSearchMetadataItem, ModrinthV3VersionUpdateMetadataItem, ModrinthVersionUpdateMetadataItem, MojangJavaRuntimeComponentMetadataItem, MojangJavaRuntimesMetadataItem, VersionUpdateParameters, VersionV3LoaderFields, VersionV3UpdateParameters}, manager::MetaLoadError}, mod_metadata::ModUpdateAction, BackendState, LoginError, WatchTarget
+    account::{BackendAccount, MinecraftLoginInfo}, arcfactory::ArcStrFactory, launch::{ArgumentExpansionKey, LaunchError}, log_reader, metadata::{items::{AssetsIndexMetadataItem, MinecraftVersionManifestMetadataItem, MinecraftVersionMetadataItem, ModrinthProjectVersionsMetadataItem, ModrinthSearchMetadataItem, ModrinthV3VersionUpdateMetadataItem, ModrinthVersionUpdateMetadataItem, MojangJavaRuntimeComponentMetadataItem, MojangJavaRuntimesMetadataItem, VersionUpdateParameters, VersionV3LoaderFields, VersionV3UpdateParameters}, manager::MetaLoadError}, mod_metadata::ModUpdateAction, BackendState, LoginError, WatchTarget
 };
 
 impl BackendState {
@@ -113,7 +113,7 @@ impl BackendState {
                     return;
                 }
 
-                let basic_info = if let Some(instance) = self.instance_state.write().instances.get_mut(id) {
+                let (dot_minecraft, configuration) = if let Some(instance) = self.instance_state.write().instances.get_mut(id) {
                     if instance.child.is_some() {
                         self.send.send_warning("Can't launch instance, already running");
                         modal_action.set_error_message("Can't launch instance, already running".into());
@@ -126,7 +126,7 @@ impl BackendState {
                     });
                     self.send.send(instance.create_modify_message_with_status(InstanceStatus::Launching));
 
-                    instance.as_basic_info()
+                    (instance.dot_minecraft_path.clone(), instance.configuration.clone())
                 } else {
                     self.send.send_error("Can't launch instance, unknown id");
                     modal_action.set_error_message("Can't launch instance, unknown id".into());
@@ -137,7 +137,7 @@ impl BackendState {
                 let launch_tracker = ProgressTracker::new(Arc::from("Launching"), self.send.clone());
                 modal_action.trackers.push(launch_tracker.clone());
 
-                let result = self.launcher.launch(&self.http_client, basic_info, quick_play, login_info, add_mods, &launch_tracker, &modal_action).await;
+                let result = self.launcher.launch(&self.http_client, dot_minecraft, configuration, quick_play, login_info, add_mods, &launch_tracker, &modal_action).await;
 
                 if matches!(result, Err(LaunchError::CancelledByUser)) {
                     self.send.send(MessageToFrontend::CloseModal);
@@ -239,7 +239,7 @@ impl BackendState {
             },
             MessageToBackend::UpdateCheck { instance: id, modal_action } => {
                 let (loader, version) = if let Some(instance) = self.instance_state.read().instances.get(id) {
-                    (instance.loader, instance.version)
+                    (instance.configuration.loader, instance.configuration.minecraft_version)
                 } else {
                     self.send.send_error("Can't update instance, unknown id");
                     modal_action.set_error_message("Can't update instance, unknown id".into());

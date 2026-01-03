@@ -16,9 +16,9 @@ impl gpui::Global for InterfaceConfigHolder {}
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct InterfaceConfig {
-    #[serde(default, deserialize_with = "try_deserialize")]
+    #[serde(default, deserialize_with = "schema::try_deserialize")]
     pub active_theme: SharedString,
-    #[serde(default, deserialize_with = "try_deserialize")]
+    #[serde(default, deserialize_with = "schema::try_deserialize")]
     pub main_page: SerializedPageType,
 }
 
@@ -97,12 +97,4 @@ pub(crate) fn write_safe(path: &Path, content: &[u8]) -> std::io::Result<()> {
     }
 
     Ok(())
-}
-
-fn try_deserialize<'de, T, D>(deserializer: D) -> Result<T, D::Error>
-where
-    T: Deserialize<'de> + Default + std::fmt::Debug,
-    D: serde::Deserializer<'de>,
-{
-    Ok(T::deserialize(serde_json::Value::deserialize(deserializer)?).unwrap_or_default())
 }
