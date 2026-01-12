@@ -9,7 +9,7 @@ use parking_lot::{RwLock, RwLockReadGuard};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use rc_zip_sync::EntryHandle;
 use rustc_hash::FxHashMap;
-use schema::{content::ContentSource, modification::ModrinthModpackFileDownload, modrinth::{ModrinthFile, ModrinthSideRequirement}};
+use schema::{content::ContentSource, fabric_mod::{FabricModJson, Icon, Person}, forge_mod::{JarJarMetadata, ModsToml}, modification::ModrinthModpackFileDownload, modrinth::{ModrinthFile, ModrinthSideRequirement}, mrpack::ModrinthIndexJson};
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, DeserializeAs, SerializeAs};
 use sha1::{Digest, Sha1};
@@ -142,6 +142,14 @@ impl ModMetadataManager {
 
         if let Some(file) = archive.by_name("fabric.mod.json") {
             Self::load_fabric_mod(hash, &archive, file)
+        } else if let Some(file) = archive.by_name("META-INF/mods.toml") {
+            Self::load_forge_mod(hash, &archive, file)
+        } else if let Some(file) = archive.by_name("META-INF/neoforge.mods.toml") {
+            Self::load_forge_mod(hash, &archive, file)
+        } else if let Some(file) = archive.by_name("META-INF/jarjar/metadata.json") {
+            Self::load_jarjar(self, hash, &archive, file)
+        } else if let Some(file) = archive.by_name("META-INF/MANIFEST.MF") {
+            Self::load_from_java_manifest(self, hash, &archive, file)
         } else if allow_children && let Some(file) = archive.by_name("modrinth.index.json") {
             self.load_modrinth_modpack(hash, &archive, file)
         } else {
@@ -203,6 +211,63 @@ impl ModMetadataManager {
             png_icon,
             update_status: Arc::new(AtomicContentUpdateStatus::new(ContentUpdateStatus::Unknown)),
             extra: LoaderSpecificModSummary::Fabric
+        }))
+    }
+
+    fn load_forge_mod<R: rc_zip_sync::HasCursor>(hash: [u8; 20], archive: &rc_zip_sync::ArchiveHandle<R>, file: EntryHandle<'_, R>) -> Option<Arc<ModSummary>> {
+        let bytes = file.bytes().ok()?;
+
+        let mods_toml: ModsToml = toml::from_slice(&bytes).inspect_err(|e| {
+            eprintln!("Error parsing mods.toml/neoforge.mods.toml: {e}");
+        }).ok()?;
+
+        let Some(first) = mods_toml.mods.first() else {
+            return None;
+        };
+
+        drop(file);
+
+        let name = first.display_name.clone().unwrap_or_else(|| Arc::clone(&first.mod_id));
+
+        let mut png_icon: Option<Arc<[u8]>> = None;
+        if let Some(icon) = &first.logo_file && let Some(icon_file) = archive.by_name(&icon) {
+            png_icon = load_icon(icon_file);
+        }
+
+        let authors = if let Some(authors) = &first.authors {
+            format!("By {authors}").into()
+        } else {
+            "".into()
+        };
+
+        let mut lowercase_search_key = first.mod_id.to_lowercase();
+        lowercase_search_key.push_str("$$");
+        lowercase_search_key.push_str(&name.to_lowercase());
+
+        let mut version = format!("v{}", first.version.as_deref().unwrap_or("1"));
+        if version.contains("${file.jarVersion}") {
+            if let Some(manifest) = archive.by_name("META-INF/MANIFEST.MF") {
+                if let Ok(manifest_bytes) = manifest.bytes() {
+                    if let Ok(manifest_str) = str::from_utf8(&manifest_bytes) {
+                        let manifest_map = crate::java_manifest::parse_java_manifest(manifest_str);
+                        if let Some(impl_version) = manifest_map.get("Implementation-Version") {
+                            version = version.replace("${file.jarVersion}", impl_version);
+                        }
+                    }
+                }
+            }
+        }
+
+        Some(Arc::new(ModSummary {
+            id: first.mod_id.clone(),
+            hash,
+            name,
+            lowercase_search_key: lowercase_search_key.into(),
+            authors,
+            version_str: version.into(),
+            png_icon,
+            update_status: Arc::new(AtomicContentUpdateStatus::new(ContentUpdateStatus::Unknown)),
+            extra: LoaderSpecificModSummary::Forge
         }))
     }
 
@@ -311,6 +376,76 @@ impl ModMetadataManager {
             }
         }))
     }
+
+    fn load_jarjar<R: rc_zip_sync::HasCursor>(self: &Arc<Self>, hash: [u8; 20], archive: &rc_zip_sync::ArchiveHandle<R>, file: EntryHandle<'_, R>) -> Option<Arc<ModSummary>> {
+        let bytes = file.bytes().ok()?;
+
+        let metadata_json: JarJarMetadata = serde_json::from_slice(&bytes).inspect_err(|e| {
+            eprintln!("Error parsing jarjar/metadata.json: {e}");
+        }).ok()?;
+
+        drop(file);
+
+        for child in &metadata_json.jars {
+            let Some(child) = archive.by_name(&child.path) else {
+                continue;
+            };
+            let Ok(child_bytes) = child.bytes() else {
+                continue;
+            };
+            if let Some(child) = self.get_bytes(&child_bytes) {
+                return Some(child);
+            }
+        }
+
+        None
+    }
+
+    fn load_from_java_manifest<R: rc_zip_sync::HasCursor>(self: &Arc<Self>, hash: [u8; 20], archive: &rc_zip_sync::ArchiveHandle<R>, file: EntryHandle<'_, R>) -> Option<Arc<ModSummary>> {
+        let bytes = file.bytes().ok()?;
+
+        let manifest_str = str::from_utf8(&bytes).ok()?;
+
+        let manifest_map = crate::java_manifest::parse_java_manifest(manifest_str);
+
+        let name: Arc<str> = if let Some(module_name) = manifest_map.get("Automatic-Module-Name") {
+            module_name.as_str().into()
+        } else if let Some(impl_title) = manifest_map.get("Implementation-Title") {
+            impl_title.as_str().into()
+        } else if let Some(spec_title) = manifest_map.get("Specification-Title") {
+            spec_title.as_str().into()
+        } else {
+            return None;
+        };
+
+        let author: Option<Arc<str>> = if let Some(impl_author) = manifest_map.get("Implementation-Vendor") {
+            Some(impl_author.as_str().into())
+        } else if let Some(spec_author) = manifest_map.get("Specification-Vendor") {
+            Some(spec_author.as_str().into())
+        } else {
+            None
+        };
+
+        let version: Option<Arc<str>> = if let Some(impl_version) = manifest_map.get("Implementation-Version") {
+            Some(Arc::from(format!("v{impl_version}")))
+        } else if let Some(spec_version) = manifest_map.get("Specification-Version") {
+            Some(Arc::from(format!("v{spec_version}")))
+        } else {
+            None
+        };
+
+        Some(Arc::new(ModSummary {
+            id: name.clone(),
+            hash,
+            name: name.clone(),
+            lowercase_search_key: name.clone(),
+            authors: author.unwrap_or_default(),
+            version_str: version.unwrap_or_default(),
+            png_icon: None,
+            update_status: Arc::new(AtomicContentUpdateStatus::new(ContentUpdateStatus::Unknown)),
+            extra: LoaderSpecificModSummary::JavaModule
+        }))
+    }
 }
 
 fn load_icon<R: rc_zip_sync::HasCursor>(icon_file: rc_zip_sync::EntryHandle<R>) -> Option<Arc<[u8]>> {
@@ -358,64 +493,6 @@ fn create_authors_string(authors: &[Person]) -> Option<String> {
     } else {
         None
     }
-}
-
-#[derive(Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
-struct FabricModJson {
-    id: Arc<str>,
-    version: Arc<str>,
-    name: Option<Arc<str>>,
-    // description: Option<Arc<str>>,
-    authors: Option<Vec<Person>>,
-    icon: Option<Icon>,
-    // #[serde(alias = "requires")]
-    // depends: Option<HashMap<Arc<str>, Dependency>>,
-    // breaks: Option<HashMap<Arc<str>, Dependency>>,
-}
-
-// #[derive(Deserialize, Debug)]
-// #[serde(untagged)]
-// enum Dependency {
-//     Single(Arc<str>),
-//     Multiple(Vec<Arc<str>>)
-// }
-
-#[derive(Deserialize, Debug)]
-#[serde(untagged)]
-enum Icon {
-    Single(Arc<str>),
-    Sizes(HashMap<usize, Arc<str>>),
-}
-
-#[derive(Deserialize, Debug)]
-#[serde(untagged)]
-enum Person {
-    Name(Arc<str>),
-    NameAndContact { name: Arc<str> },
-}
-
-impl Person {
-    pub fn name(&self) -> &str {
-        match self {
-            Person::Name(name) => name,
-            Person::NameAndContact { name, .. } => name,
-        }
-    }
-}
-
-#[derive(Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
-struct ModrinthIndexJson {
-    version_id: Arc<str>,
-    name: Arc<str>,
-    files: Arc<[ModrinthModpackFileDownload]>,
-
-    // Unofficial
-    #[serde(default, deserialize_with = "schema::try_deserialize")]
-    authors: Option<Vec<Person>>,
-    #[serde(default, deserialize_with = "schema::try_deserialize")]
-    author: Option<Person>,
 }
 
 #[serde_as]

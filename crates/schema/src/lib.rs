@@ -4,7 +4,9 @@ pub mod assets_index;
 pub mod content;
 pub mod fabric_launch;
 pub mod fabric_loader_manifest;
+pub mod fabric_mod;
 pub mod forge;
+pub mod forge_mod;
 pub mod instance;
 pub mod java_runtime_component;
 pub mod java_runtimes;
@@ -12,6 +14,7 @@ pub mod loader;
 pub mod maven;
 pub mod modification;
 pub mod modrinth;
+pub mod mrpack;
 pub mod version;
 pub mod version_manifest;
 

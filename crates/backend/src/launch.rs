@@ -662,16 +662,9 @@ impl Launcher {
                 continue;
             };
 
-            let mut main_class = None;
-            for line in manifest_str.split("\n") {
-                let line = line.trim_ascii();
-                if line.starts_with("Main-Class:") {
-                    main_class = Some(line["Main-Class:".len()..].trim_ascii());
-                    break;
-                }
-            }
+            let manifest_map = crate::java_manifest::parse_java_manifest(manifest_str);
 
-            let Some(main_class) = main_class else {
+            let Some(main_class) = manifest_map.get("Main-Class") else {
                 eprintln!("Unable to run processor, can't find Main-Class in MANIFEST.MF");
                 processor_tracker.add_count(1);
                 processor_tracker.notify();

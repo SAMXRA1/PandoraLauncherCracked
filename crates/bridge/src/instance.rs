@@ -85,6 +85,8 @@ pub struct ModSummary {
 #[derive(Debug, Clone)]
 pub enum LoaderSpecificModSummary {
     Fabric,
+    Forge,
+    JavaModule,
     ModrinthModpack {
         downloads: Arc<[ModrinthModpackFileDownload]>,
         summaries: Arc<[Option<Arc<ModSummary>>]>,

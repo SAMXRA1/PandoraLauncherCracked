@@ -50,6 +50,7 @@ relative-path.workspace = true
 shell-words.workspace = true
 serde-xml-rs.workspace = true
 memchr.workspace = true
+toml.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
 junction = "1.3.0"

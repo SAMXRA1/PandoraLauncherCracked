@@ -17,6 +17,7 @@ mod config;
 mod directories;
 mod install_content;
 mod instance;
+mod java_manifest;
 mod launch;
 mod launch_wrapper;
 mod lockfile;
