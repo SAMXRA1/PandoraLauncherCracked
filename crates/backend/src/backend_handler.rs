@@ -399,6 +399,7 @@ impl BackendState {
             MessageToBackend::UpdateMod { instance: id, mod_id, modal_action } => {
                 let content_install = if let Some(instance) = self.instance_state.write().instances.get_mut(id) {
                     let configuration = instance.configuration.get();
+                    let (loader, minecraft_version) = (configuration.loader, configuration.minecraft_version);
                     let Some(mod_summary) = instance.try_get_mod(mod_id) else {
                         self.send.send_error("Can't update mod in instance, unknown mod id");
                         modal_action.set_finished();
@@ -440,8 +441,8 @@ impl BackendState {
                             debug_assert!(path.is_absolute());
                             ContentInstall {
                                 target: InstallTarget::Instance(id),
-                                loader_hint: configuration.loader,
-                                version_hint: Some(configuration.minecraft_version.into()),
+                                loader_hint: loader,
+                                version_hint: Some(minecraft_version.into()),
                                 files: [ContentInstallFile {
                                     replace_old: Some(mod_summary.path.clone()),
                                     path: bridge::install::ContentInstallPath::Raw(path.into()),
