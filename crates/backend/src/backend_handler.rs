@@ -221,6 +221,7 @@ impl BackendState {
                         }
                     },
                     Err(ref err) => {
+                        log::error!("Failed to launch due to error: {:?}", &err);
                         modal_action.set_error_message(format!("{}", &err).into());
                     },
                 }
