@@ -4,6 +4,7 @@ mod backend;
 use std::{ffi::OsString, io::Write, path::{Path, PathBuf}};
 
 pub use backend::*;
+use bridge::instance::InstanceContentSummary;
 use rand::RngCore;
 use serde::Deserialize;
 use sha1::{Digest, Sha1};
@@ -88,8 +89,21 @@ pub(crate) fn write_safe(path: &Path, content: &[u8]) -> std::io::Result<()> {
     Ok(())
 }
 
-pub(crate) fn child_state_path(path: &Path) -> Option<PathBuf> {
-    let mut new_path = path.to_path_buf();
+pub(crate) fn pandora_aux_path_for_content(content: &InstanceContentSummary) -> Option<PathBuf> {
+    let name = content.content_summary.id.as_ref()
+        .or(content.content_summary.name.as_ref());
+
+    if let Some(name) = name {
+        let name = name.trim_ascii();
+        if !name.is_empty() {
+            let mut path = content.path.parent()?.join(format!(".{name}"));
+            path.add_extension("aux");
+            path.add_extension("json");
+            return Some(path);
+        }
+    }
+
+    let mut new_path = content.path.to_path_buf();
 
     if let Some(extension) = new_path.extension() {
         if extension == "disabled" {
@@ -97,15 +111,13 @@ pub(crate) fn child_state_path(path: &Path) -> Option<PathBuf> {
         }
     }
 
-    let Some(filename) = new_path.file_name() else {
-        return None;
-    };
-
     let mut new_filename = OsString::new();
     new_filename.push(".");
-    new_filename.push(filename);
-    new_filename.push(".pandorachildstate");
+    new_filename.push(new_path.file_name()?);
     new_path.set_file_name(new_filename);
+
+    new_path.add_extension("aux");
+    new_path.add_extension("json");
 
     Some(new_path)
 }

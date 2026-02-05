@@ -1,6 +1,6 @@
 use std::{
-    collections::HashSet, ffi::OsStr, hash::{DefaultHasher, Hash, Hasher}, io::Read, path::Path, process::Child, sync::{
-        atomic::Ordering, Arc
+    collections::{BTreeMap, HashSet}, ffi::OsStr, hash::{DefaultHasher, Hash, Hasher}, io::Read, path::{Path, PathBuf}, process::Child, sync::{
+        Arc, atomic::Ordering
     }
 };
 
@@ -13,7 +13,7 @@ use bridge::{
 };
 use parking_lot::RwLock;
 use relative_path::RelativePath;
-use schema::instance::InstanceConfiguration;
+use schema::{aux::{AuxDisabledChildren, AuxiliaryContentMeta}, instance::InstanceConfiguration};
 use strum::IntoEnumIterator;
 use thiserror::Error;
 
@@ -101,18 +101,25 @@ impl ContentFolderState {
         }
 
         if let Some(ref current_path) = path {
-            if let Some(extension) = current_path.extension() && extension == "pandorachildstate" {
-                let mut new_path = current_path.to_path_buf();
-                new_path.set_extension("");
-                if let Some(file_name) = new_path.file_name() {
-                    if file_name.as_encoded_bytes()[0] == '.' as u8 {
-                        let encoded = file_name.as_encoded_bytes().to_vec();
-                        new_path.set_file_name(unsafe {
-                            OsStr::from_encoded_bytes_unchecked(&encoded[1..])
-                        });
+            if let Some(filename) = current_path.file_name() {
+                if filename.as_encoded_bytes().ends_with(b".aux.json") {
+                    let mut found = false;
+                    if let Some(summaries) = &self.summaries {
+                        for summary in summaries.iter() {
+                            let Some(aux_path) = crate::pandora_aux_path_for_content(&summary) else {
+                                continue;
+                            };
+                            if &**current_path == aux_path.as_path() {
+                                path = Some(summary.path.clone());
+                                found = true;
+                                break;
+                            }
+                        }
+                    }
+                    if !found {
+                        path = None;
                     }
                 }
-                path = Some(new_path.into());
             }
         }
 
@@ -785,7 +792,6 @@ fn create_instance_content_summary(path: &Path, mod_metadata_manager: &Arc<ModMe
         lowercase_filename.into()
     };
 
-    let disabled_children = read_disabled_children_for(path).unwrap_or_default();
     let content_source = mod_metadata_manager.read_content_sources().get(&summary.hash).unwrap_or_default();
 
     let lowercase_search_keys = summary.id.clone().into_iter()
@@ -793,7 +799,7 @@ fn create_instance_content_summary(path: &Path, mod_metadata_manager: &Arc<ModMe
         .chain(std::iter::once(lowercase_filename))
         .collect();
 
-    Some(InstanceContentSummary {
+    let mut summary = InstanceContentSummary {
         content_summary: summary,
         id: InstanceContentID::dangling(),
         lowercase_search_keys,
@@ -802,21 +808,22 @@ fn create_instance_content_summary(path: &Path, mod_metadata_manager: &Arc<ModMe
         path: path.into(),
         enabled,
         content_source,
-        disabled_children,
-    })
+        disabled_children: Default::default(),
+    };
+
+    if let Some(disabled_children) = read_disabled_children_for(&summary) {
+        summary.disabled_children = Arc::new(disabled_children);
+    }
+
+    Some(summary)
 }
 
-fn read_disabled_children_for(path: &Path) -> Option<HashSet<String>> {
-    let child_state_path = crate::child_state_path(&path)?;
-
-    let mut file = std::fs::File::open(child_state_path).ok()?;
-
-    let _ = file.lock();
-
-    let mut string = String::new();
-    file.read_to_string(&mut string).ok()?;
-
-    Some(string.split_terminator('\n').map(str::to_string).collect())
+fn read_disabled_children_for(
+    summary: &InstanceContentSummary
+) -> Option<AuxDisabledChildren> {
+    let aux_path = crate::pandora_aux_path_for_content(&summary)?;
+    let aux: AuxiliaryContentMeta = crate::read_json(&aux_path).ok()?;
+    Some(aux.disabled_children)
 }
 
 fn load_world_summary(path: &Path) -> anyhow::Result<InstanceWorldSummary> {

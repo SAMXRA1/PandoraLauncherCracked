@@ -6,12 +6,10 @@ use std::{
 
 use enumset::{EnumSet, EnumSetType};
 use schema::{
-    backend_config::{BackendConfig, SyncTarget},
-    instance::{
+    backend_config::{BackendConfig, SyncTarget}, instance::{
         InstanceConfiguration, InstanceJvmBinaryConfiguration, InstanceJvmFlagsConfiguration,
         InstanceLinuxWrapperConfiguration, InstanceMemoryConfiguration,
-    },
-    loader::Loader, pandora_update::{UpdateManifest, UpdateManifestExe, UpdatePrompt},
+    }, loader::Loader, pandora_update::{UpdateManifest, UpdateManifestExe, UpdatePrompt}
 };
 use ustr::Ustr;
 use uuid::Uuid;
@@ -103,7 +101,9 @@ pub enum MessageToBackend {
     SetContentChildEnabled {
         id: InstanceID,
         content_id: InstanceContentID,
-        path: Arc<str>,
+        child_id: Option<Arc<str>>,
+        child_name: Option<Arc<str>>,
+        child_filename: Arc<str>,
         enabled: bool,
     },
     DeleteContent {

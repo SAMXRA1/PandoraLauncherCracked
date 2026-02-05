@@ -119,6 +119,12 @@ impl ModMetadataManager {
         summary
     }
 
+    pub fn get_cached_by_sha1(self: &Arc<Self>, sha1: &str) -> Option<Arc<ContentSummary>> {
+        let mut hash = [0u8; 20];
+        hex::decode_to_slice(sha1, &mut hash).ok()?;
+        self.by_hash.read().get(&hash).cloned().flatten()
+    }
+
     pub fn get_bytes(self: &Arc<Self>, bytes: &[u8]) -> Option<Arc<ContentSummary>> {
         let mut hasher = Sha1::new();
         hasher.write_all(bytes).ok()?;

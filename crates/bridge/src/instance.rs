@@ -1,6 +1,6 @@
 use std::{collections::HashSet, path::Path, sync::Arc};
 
-use schema::{content::ContentSource, modification::ModrinthModpackFileDownload};
+use schema::{aux::AuxDisabledChildren, content::ContentSource, modification::ModrinthModpackFileDownload};
 
 use crate::safe_path::SafePath;
 
@@ -67,7 +67,7 @@ pub struct InstanceContentSummary {
     pub path: Arc<Path>,
     pub enabled: bool,
     pub content_source: ContentSource,
-    pub disabled_children: HashSet<String>,
+    pub disabled_children: Arc<AuxDisabledChildren>,
 }
 
 #[derive(Debug, Clone)]
