@@ -1060,6 +1060,7 @@ impl BackendState {
             jvm_flags: None,
             jvm_binary: None,
             linux_wrapper: None,
+            system_libraries: None,
         };
 
         let info_path = instance_dir.join("info_v1.json");

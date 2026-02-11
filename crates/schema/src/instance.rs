@@ -19,6 +19,8 @@ pub struct InstanceConfiguration {
     pub jvm_binary: Option<InstanceJvmBinaryConfiguration>,
     #[serde(default, deserialize_with = "crate::try_deserialize", skip_serializing_if = "is_default_linux_wrapper_configuration")]
     pub linux_wrapper: Option<InstanceLinuxWrapperConfiguration>,
+    #[serde(default, deserialize_with = "crate::try_deserialize", skip_serializing_if = "is_default_system_libraries_configuration")]
+    pub system_libraries: Option<InstanceSystemLibrariesConfiguration>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Copy, Clone)]
@@ -106,5 +108,56 @@ fn is_default_linux_wrapper_configuration(config: &Option<InstanceLinuxWrapperCo
         !config.use_mangohud && !config.use_gamemode && config.use_discrete_gpu
     } else {
         true
+    }
+}
+
+
+#[derive(Serialize, Deserialize, Default, Debug, Clone)]
+pub struct InstanceSystemLibrariesConfiguration {
+    pub override_glfw: bool,
+    pub glfw: LwjglLibraryPath,
+    pub override_openal: bool,
+    pub openal: LwjglLibraryPath,
+}
+
+#[derive(Serialize, Deserialize, Default, Debug, Clone)]
+pub enum LwjglLibraryPath {
+    #[default]
+    None,
+    Auto(Arc<Path>),
+    Explicit(Arc<Path>),
+}
+
+fn is_default_system_libraries_configuration(config: &Option<InstanceSystemLibrariesConfiguration>) -> bool {
+    if let Some(config) = config {
+        matches!(config.glfw, LwjglLibraryPath::None) && matches!(config.openal, LwjglLibraryPath::None)
+    } else {
+        true
+    }
+}
+
+impl LwjglLibraryPath {
+    pub fn get_or_auto(self, auto: &Option<Arc<Path>>) -> Option<Arc<Path>> {
+        match self {
+            LwjglLibraryPath::None => auto.clone(),
+            LwjglLibraryPath::Auto(path) => {
+                if path.exists() {
+                    Some(path)
+                } else {
+                    auto.clone()
+                }
+            },
+            LwjglLibraryPath::Explicit(path) => {
+                Some(path)
+            },
+        }
+    }
+
+    pub fn get_path(&self) -> Option<&Path> {
+        match self {
+            LwjglLibraryPath::None => None,
+            LwjglLibraryPath::Auto(path) => Some(&**path),
+            LwjglLibraryPath::Explicit(path) => Some(&**path),
+        }
     }
 }

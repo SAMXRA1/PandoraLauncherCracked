@@ -133,6 +133,13 @@ impl BackendState {
                     });
                 }
             },
+            MessageToBackend::SetInstanceSystemLibraries { id, system_libraries } => {
+                if let Some(instance) = self.instance_state.write().instances.get_mut(id) {
+                    instance.configuration.modify(|configuration| {
+                        configuration.system_libraries = Some(system_libraries);
+                    });
+                }
+            },
             MessageToBackend::KillInstance { id } => {
                 if let Some(instance) = self.instance_state.write().instances.get_mut(id) {
                     if let Some(mut child) = instance.child.take() {

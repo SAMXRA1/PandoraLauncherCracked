@@ -7,7 +7,8 @@ use gpui::{prelude::*, *};
 use gpui_component::{
     ActiveTheme as _, Disableable, Selectable, Sizable, WindowExt, button::{Button, ButtonGroup, ButtonVariants}, checkbox::Checkbox, h_flex, input::{Input, InputEvent, InputState, NumberInput, NumberInputEvent}, notification::{Notification, NotificationType}, select::{SearchableVec, Select, SelectEvent, SelectState}, spinner::Spinner, v_flex
 };
-use schema::{fabric_loader_manifest::FabricLoaderManifest, forge::{ForgeMavenManifest, NeoforgeMavenManifest}, instance::{InstanceJvmBinaryConfiguration, InstanceJvmFlagsConfiguration, InstanceLinuxWrapperConfiguration, InstanceMemoryConfiguration}, loader::Loader, version_manifest::MinecraftVersionManifest};
+use once_cell::sync::Lazy;
+use schema::{fabric_loader_manifest::FabricLoaderManifest, forge::{ForgeMavenManifest, NeoforgeMavenManifest}, instance::{InstanceJvmBinaryConfiguration, InstanceJvmFlagsConfiguration, InstanceLinuxWrapperConfiguration, InstanceMemoryConfiguration, InstanceSystemLibrariesConfiguration, LwjglLibraryPath}, loader::Loader, version_manifest::MinecraftVersionManifest};
 
 use crate::{entity::{DataEntities, instance::InstanceEntry, metadata::{AsMetadataResult, FrontendMetadata, FrontendMetadataResult, FrontendMetadataState, TypelessFrontendMetadataResult}}, interface_config::InterfaceConfig, pages::instances_page::VersionList};
 
@@ -35,6 +36,12 @@ pub struct InstanceSettingsSubpage {
     jvm_flags_input_state: Entity<InputState>,
     jvm_binary_enabled: bool,
     jvm_binary_path: Option<Arc<Path>>,
+
+    override_glfw_enabled: bool,
+    override_glfw_path: Option<Arc<Path>>,
+    override_openal_enabled: bool,
+    override_openal_path: Option<Arc<Path>>,
+
     #[cfg(target_os = "linux")]
     use_mangohud: bool,
     #[cfg(target_os = "linux")]
@@ -67,7 +74,12 @@ impl InstanceSettingsSubpage {
         let memory = entry.configuration.memory.unwrap_or_default();
         let jvm_flags = entry.configuration.jvm_flags.clone().unwrap_or_default();
         let jvm_binary = entry.configuration.jvm_binary.clone().unwrap_or_default();
+        #[cfg(target_os = "linux")]
         let linux_wrapper = entry.configuration.linux_wrapper.unwrap_or_default();
+        let system_libraries = entry.configuration.system_libraries.clone().unwrap_or_default();
+
+        let glfw_path = system_libraries.glfw.get_or_auto(&*AUTO_LIBRARY_PATH_GLFW);
+        let openal_path = system_libraries.openal.get_or_auto(&*AUTO_LIBRARY_PATH_OPENAL);
 
         let new_name_input_state = cx.new(|cx| InputState::new(window, cx));
         cx.subscribe(&new_name_input_state, Self::on_new_name_input).detach();
@@ -128,6 +140,10 @@ impl InstanceSettingsSubpage {
             jvm_flags_input_state,
             jvm_binary_enabled: jvm_binary.enabled,
             jvm_binary_path: jvm_binary.path.clone(),
+            override_glfw_enabled: system_libraries.override_glfw,
+            override_glfw_path: glfw_path,
+            override_openal_enabled: system_libraries.override_openal,
+            override_openal_path: openal_path,
             #[cfg(target_os = "linux")]
             use_mangohud: linux_wrapper.use_mangohud,
             #[cfg(target_os = "linux")]
@@ -423,6 +439,28 @@ impl InstanceSettingsSubpage {
         }
     }
 
+    fn get_system_libraries_configuration(&self) -> InstanceSystemLibrariesConfiguration {
+        InstanceSystemLibrariesConfiguration {
+            override_glfw: self.override_glfw_enabled,
+            glfw: Self::create_lwjgl_library_path(&self.override_glfw_path, &*AUTO_LIBRARY_PATH_GLFW),
+            override_openal: self.override_openal_enabled,
+            openal: Self::create_lwjgl_library_path(&self.override_openal_path, &*AUTO_LIBRARY_PATH_OPENAL),
+
+        }
+    }
+
+    fn create_lwjgl_library_path(path: &Option<Arc<Path>>, auto: &Option<Arc<Path>>) -> LwjglLibraryPath {
+        if let Some(path) = path {
+            if let Some(auto) = auto && path == auto {
+                LwjglLibraryPath::Auto(path.clone())
+            } else {
+                LwjglLibraryPath::Explicit(path.clone())
+            }
+        } else {
+            LwjglLibraryPath::None
+        }
+    }
+
     #[cfg(target_os = "linux")]
     fn get_linux_wrapper_configuration(&self) -> InstanceLinuxWrapperConfiguration {
         InstanceLinuxWrapperConfiguration {
@@ -441,6 +479,39 @@ impl InstanceSettingsSubpage {
             .map(|output| output.status.success())
             .unwrap_or(false)
     }
+
+    pub fn select_file(&mut self, message: &'static str, handle: impl FnOnce(&mut Self, Option<Arc<Path>>) + 'static, window: &mut Window, cx: &mut Context<Self>) {
+        let receiver = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: Some(SharedString::new_static(message))
+        });
+
+        let this_entity = cx.entity();
+        self._select_file_task = window.spawn(cx, async move |cx| {
+            let Ok(result) = receiver.await else {
+                return;
+            };
+            _ = cx.update_window_entity(&this_entity, move |this, window, cx| {
+                match result {
+                    Ok(Some(paths)) => {
+                        (handle)(this, paths.first().map(|v| v.as_path().into()));
+                        cx.notify();
+                    },
+                    Ok(None) => {},
+                    Err(error) => {
+                        let error = format!("{}", error);
+                        let notification = Notification::new()
+                            .autohide(false)
+                            .with_type(NotificationType::Error)
+                            .title(error);
+                        window.push_notification(notification, cx);
+                    },
+                }
+            });
+        });
+    }
 }
 
 impl Render for InstanceSettingsSubpage {
@@ -457,11 +528,9 @@ impl Render for InstanceSettingsSubpage {
         let jvm_flags_enabled = self.jvm_flags_enabled;
         let jvm_binary_enabled = self.jvm_binary_enabled;
 
-        let jvm_binary_label = if let Some(path) = &self.jvm_binary_path {
-            SharedString::new(path.to_string_lossy())
-        } else {
-            SharedString::new_static("<unset>")
-        };
+        let jvm_binary_label = opt_path_to_string(&self.jvm_binary_path);
+        let glfw_path_label = opt_path_to_string(&self.override_glfw_path);
+        let openal_path_label = opt_path_to_string(&self.override_openal_path);
 
         let mut basic_content = v_flex()
             .gap_4()
@@ -628,41 +697,59 @@ impl Render for InstanceSettingsSubpage {
                     }
                 })))
                 .child(Button::new("select_jvm_binary").success().label(jvm_binary_label).disabled(!jvm_binary_enabled).on_click(cx.listener(|this, _, window, cx| {
-                    let receiver = cx.prompt_for_paths(PathPromptOptions {
-                        files: true,
-                        directories: false,
-                        multiple: false,
-                        prompt: Some("Select JVM binary".into())
-                    });
-
-                    let this_entity = cx.entity();
-                    let add_from_file_task = window.spawn(cx, async move |cx| {
-                        let Ok(result) = receiver.await else {
-                            return;
-                        };
-                        _ = cx.update_window_entity(&this_entity, move |this, window, cx| {
-                            match result {
-                                Ok(Some(paths)) => {
-                                    this.jvm_binary_path = paths.first().map(|v| v.as_path().into());
-                                    this.backend_handle.send(MessageToBackend::SetInstanceJvmBinary {
-                                        id: this.instance_id,
-                                        jvm_binary: this.get_jvm_binary_configuration()
-                                    });
-                                    cx.notify();
-                                },
-                                Ok(None) => {},
-                                Err(error) => {
-                                    let error = format!("{}", error);
-                                    let notification = Notification::new()
-                                        .autohide(false)
-                                        .with_type(NotificationType::Error)
-                                        .title(error);
-                                    window.push_notification(notification, cx);
-                                },
-                            }
+                    this.select_file("Select Jvm Binary", |this, path| {
+                        this.jvm_binary_path = path;
+                        this.backend_handle.send(MessageToBackend::SetInstanceJvmBinary {
+                            id: this.instance_id,
+                            jvm_binary: this.get_jvm_binary_configuration()
                         });
-                    });
-                    this._select_file_task = add_from_file_task;
+                    }, window, cx);
+                })))
+            )
+            .child(v_flex()
+                .gap_1()
+                .child(Checkbox::new("system_glfw").label("Use System GLFW").checked(self.override_glfw_enabled).on_click(cx.listener(|page, value, _, cx| {
+                    if page.override_glfw_enabled != *value {
+                        page.override_glfw_enabled = *value;
+                        page.backend_handle.send(MessageToBackend::SetInstanceSystemLibraries {
+                            id: page.instance_id,
+                            system_libraries: page.get_system_libraries_configuration()
+                        });
+                        cx.notify();
+
+                    }
+                })))
+                .child(Button::new("select_glfw").success().label(glfw_path_label).disabled(!self.override_glfw_enabled).on_click(cx.listener(|this, _, window, cx| {
+                    this.select_file("Select GLFW Library", |this, path| {
+                        this.override_glfw_path = path;
+                        this.backend_handle.send(MessageToBackend::SetInstanceSystemLibraries {
+                            id: this.instance_id,
+                            system_libraries: this.get_system_libraries_configuration()
+                        });
+                    }, window, cx);
+                })))
+            )
+            .child(v_flex()
+                .gap_1()
+                .child(Checkbox::new("system_openal").label("Use System OpenAL").checked(self.override_openal_enabled).on_click(cx.listener(|page, value, _, cx| {
+                    if page.override_openal_enabled != *value {
+                        page.override_openal_enabled = *value;
+                        page.backend_handle.send(MessageToBackend::SetInstanceSystemLibraries {
+                            id: page.instance_id,
+                            system_libraries: page.get_system_libraries_configuration()
+                        });
+                        cx.notify();
+
+                    }
+                })))
+                .child(Button::new("select_openal").success().label(openal_path_label).disabled(!self.override_openal_enabled).on_click(cx.listener(|this, _, window, cx| {
+                    this.select_file("Select OpenAL Library", |this, path| {
+                        this.override_openal_path = path;
+                        this.backend_handle.send(MessageToBackend::SetInstanceSystemLibraries {
+                            id: this.instance_id,
+                            system_libraries: this.get_system_libraries_configuration()
+                        });
+                    }, window, cx);
                 })))
             );
 
@@ -775,4 +862,44 @@ impl Render for InstanceSettingsSubpage {
                 .child(sections)
             )
     }
+}
+
+fn opt_path_to_string(path: &Option<Arc<Path>>) -> SharedString {
+    if let Some(path) = path {
+        SharedString::new(path.to_string_lossy())
+    } else {
+        SharedString::new_static("<unset>")
+    }
+}
+
+static AUTO_LIBRARY_PATH_GLFW: Lazy<Option<Arc<Path>>> = Lazy::new(|| get_shared_library_path_for_name("glfw"));
+static AUTO_LIBRARY_PATH_OPENAL: Lazy<Option<Arc<Path>>> = Lazy::new(|| get_shared_library_path_for_name("openal"));
+
+#[cfg(not(unix))]
+fn get_shared_library_path_for_name(name: &str) -> Option<Arc<Path>> {
+    None
+}
+
+#[cfg(unix)]
+fn get_shared_library_path_for_name(name: &str) -> Option<Arc<Path>> {
+    let filename = format!("{}{}{}", std::env::consts::DLL_PREFIX, name, std::env::consts::DLL_SUFFIX);
+
+    let search_paths = &[
+        "/lib/",
+        "/lib64/",
+        "/usr/lib/",
+        "/usr/lib64/",
+        "/usr/local/lib/",
+        #[cfg(target_os = "macos")]
+        "/opt/homebrew/lib/"
+    ];
+
+    for search_path in search_paths {
+        let path = Path::new(search_path).join(&filename);
+        if path.exists() {
+            return Some(path.into());
+        }
+    }
+
+    None
 }

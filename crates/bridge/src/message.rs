@@ -8,7 +8,7 @@ use enumset::{EnumSet, EnumSetType};
 use schema::{
     backend_config::{BackendConfig, SyncTarget}, instance::{
         InstanceConfiguration, InstanceJvmBinaryConfiguration, InstanceJvmFlagsConfiguration,
-        InstanceLinuxWrapperConfiguration, InstanceMemoryConfiguration,
+        InstanceLinuxWrapperConfiguration, InstanceMemoryConfiguration, InstanceSystemLibrariesConfiguration,
     }, loader::Loader, pandora_update::{UpdateManifest, UpdateManifestExe, UpdatePrompt}
 };
 use ustr::Ustr;
@@ -72,6 +72,10 @@ pub enum MessageToBackend {
     SetInstanceLinuxWrapper {
         id: InstanceID,
         linux_wrapper: InstanceLinuxWrapperConfiguration,
+    },
+    SetInstanceSystemLibraries {
+        id: InstanceID,
+        system_libraries: InstanceSystemLibrariesConfiguration,
     },
     KillInstance {
         id: InstanceID,

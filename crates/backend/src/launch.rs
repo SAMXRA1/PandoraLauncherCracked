@@ -2168,7 +2168,6 @@ impl LaunchContext {
             }
         }
 
-
         if !self.add_mods.is_empty() {
             match self.configuration.loader {
                 Loader::Vanilla => {},
@@ -2185,6 +2184,21 @@ impl LaunchContext {
                         panic!("addMods was used for unsupported loader: {:?}", self.configuration.loader);
                     }
                 }
+            }
+        }
+
+        if let Some(system_libraries) = self.configuration.system_libraries {
+            if let Some(path) = system_libraries.glfw.get_path() {
+                stdin_arguments.push_str("property\n");
+                stdin_arguments.push_str("org.lwjgl.glfw.libname\n");
+                stdin_arguments.push_str(&path.to_string_lossy());
+                stdin_arguments.push('\n');
+            }
+            if let Some(path) = system_libraries.openal.get_path() {
+                stdin_arguments.push_str("property\n");
+                stdin_arguments.push_str("org.lwjgl.openal.libname\n");
+                stdin_arguments.push_str(&path.to_string_lossy());
+                stdin_arguments.push('\n');
             }
         }
 
