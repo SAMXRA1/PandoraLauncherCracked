@@ -60,7 +60,7 @@ impl InstanceList {
                         .fixed_left()
                         .sortable()
                         .resizable(true),
-                    Column::new("loader", "Loader")
+                    Column::new("loader", "Modloader")
                         .width(150.)
                         .fixed_left()
                         .resizable(true),

@@ -5,10 +5,11 @@ use bridge::{
 };
 use gpui::{prelude::*, *};
 use gpui_component::{
-    ActiveTheme as _, Disableable, Selectable, Sizable, WindowExt, button::{Button, ButtonGroup, ButtonVariants}, checkbox::Checkbox, h_flex, input::{Input, InputEvent, InputState, NumberInput, NumberInputEvent}, notification::{Notification, NotificationType}, select::{SearchableVec, Select, SelectEvent, SelectState}, spinner::Spinner, v_flex
+    button::{Button, ButtonGroup, ButtonVariants}, checkbox::Checkbox, h_flex, input::{Input, InputEvent, InputState, NumberInput, NumberInputEvent}, notification::{Notification, NotificationType}, select::{SearchableVec, Select, SelectEvent, SelectState}, skeleton::Skeleton, spinner::Spinner, v_flex, ActiveTheme as _, Disableable, Selectable, Sizable, WindowExt
 };
 use once_cell::sync::Lazy;
 use schema::{fabric_loader_manifest::FabricLoaderManifest, forge::{ForgeMavenManifest, NeoforgeMavenManifest}, instance::{InstanceJvmBinaryConfiguration, InstanceJvmFlagsConfiguration, InstanceLinuxWrapperConfiguration, InstanceMemoryConfiguration, InstanceSystemLibrariesConfiguration, LwjglLibraryPath}, loader::Loader, version_manifest::MinecraftVersionManifest};
+use strum::IntoEnumIterator;
 
 use crate::{entity::{DataEntities, instance::InstanceEntry, metadata::{AsMetadataResult, FrontendMetadata, FrontendMetadataResult, FrontendMetadataState, TypelessFrontendMetadataResult}}, interface_config::InterfaceConfig, pages::instances_page::VersionList};
 
@@ -27,6 +28,7 @@ pub struct InstanceSettingsSubpage {
     version_state: TypelessFrontendMetadataResult,
     version_select_state: Entity<SelectState<VersionList>>,
     loader: Loader,
+    loader_select_state: Entity<SelectState<Vec<&'static str>>>,
     loader_versions_state: TypelessFrontendMetadataResult,
     loader_version_select_state: Entity<SelectState<SearchableVec<&'static str>>>,
     memory_override_enabled: bool,
@@ -92,6 +94,17 @@ impl InstanceSettingsSubpage {
         }).detach();
         cx.subscribe(&version_select_state, Self::on_minecraft_version_selected).detach();
 
+        let loader_select_state = cx.new(|cx| {
+            let loaders = Loader::iter()
+                .filter(|l| *l != Loader::Unknown)
+                .map(|l| l.name())
+                .collect();
+            let mut state = SelectState::new(loaders, None, window, cx);
+            state.set_selected_value(&loader.name(), window, cx);
+            state
+        });
+        cx.subscribe_in(&loader_select_state, window, Self::on_loader_selected).detach();
+
         cx.observe_in(instance, window, |page, instance, window, cx| {
             if page.loader_version_select_state.read(cx).selected_index(cx).is_none() {
                 let version = instance.read(cx).configuration.preferred_loader_version.map(|s| s.as_str()).unwrap_or("Latest");
@@ -132,6 +145,7 @@ impl InstanceSettingsSubpage {
             version_state: TypelessFrontendMetadataResult::Loading,
             version_select_state,
             loader,
+            loader_select_state,
             loader_version_select_state,
             memory_override_enabled: memory.enabled,
             memory_min_input_state,
@@ -335,6 +349,34 @@ impl InstanceSettingsSubpage {
         });
     }
 
+    pub fn on_loader_selected(
+        &mut self,
+        _state: &Entity<SelectState<Vec<&'static str>>>,
+        event: &SelectEvent<Vec<&'static str>>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let SelectEvent::Confirm(value) = event;
+        let Some(value) = value else {
+            return;
+        };
+
+        let loader = Loader::from_name(value);
+        if loader == Loader::Unknown {
+            return;
+        }
+
+        if self.loader != loader {
+            self.loader = loader;
+            self.backend_handle.send(MessageToBackend::SetInstanceLoader {
+                id: self.instance_id,
+                loader: self.loader,
+            });
+            self.update_loader_versions(window, cx);
+            cx.notify();
+        }
+    }
+
     pub fn on_loader_version_selected(
         &mut self,
         _state: Entity<SelectState<SearchableVec<&'static str>>>,
@@ -535,9 +577,9 @@ impl Render for InstanceSettingsSubpage {
         let mut basic_content = v_flex()
             .gap_4()
             .size_full()
-            .child(v_flex()
-                .child("Instance name")
-                .child(h_flex()
+            .child(crate::labelled(
+                "Instance Name",
+                h_flex()
                     .gap_2()
                     .child(Input::new(&self.new_name_input_state))
                     .when(self.new_name_change_state != NewNameChangeState::NoChange, |this| {
@@ -562,89 +604,45 @@ impl Render for InstanceSettingsSubpage {
                 )
             );
 
+        let mut version_content = v_flex().gap_2();
+
         match self.version_state {
             TypelessFrontendMetadataResult::Loading => {
-                basic_content = basic_content.child(crate::labelled(
-                    "Version",
-                    Spinner::new()
-                ))
+                version_content = version_content.child(Skeleton::new().w_full().min_h_8().max_h_8().rounded_md());
             },
             TypelessFrontendMetadataResult::Loaded => {
-                basic_content = basic_content.child(crate::labelled(
-                    "Version",
-                    Select::new(&self.version_select_state).w_full()
-                ))
+                version_content = version_content.child(Select::new(&self.version_select_state).w_full());
             },
             TypelessFrontendMetadataResult::Error(ref error) => {
-                basic_content = basic_content.child(format!("Error loading minecraft versions: {}", error))
+                version_content = version_content.child(format!("Error loading minecraft versions: {}", error))
             },
         }
 
-        basic_content = basic_content
-            .child(ButtonGroup::new("loader")
-                .outline()
-                .child(
-                    Button::new("loader-vanilla")
-                        .label("Vanilla")
-                        .selected(self.loader == Loader::Vanilla),
-                )
-                .child(
-                    Button::new("loader-fabric")
-                        .label("Fabric")
-                        .selected(self.loader == Loader::Fabric),
-                )
-                .child(
-                    Button::new("loader-forge")
-                        .label("Forge")
-                        .selected(self.loader == Loader::Forge),
-                )
-                .child(
-                    Button::new("loader-neoforge")
-                        .label("NeoForge")
-                        .selected(self.loader == Loader::NeoForge),
-                )
-                .on_click(cx.listener({
-                    let backend_handle = self.backend_handle.clone();
-                    move |page, selected: &Vec<usize>, window, cx| {
-                        let last_loader = page.loader;
-                        match selected.first() {
-                            Some(0) => page.loader = Loader::Vanilla,
-                            Some(1) => page.loader = Loader::Fabric,
-                            Some(2) => page.loader = Loader::Forge,
-                            Some(3) => page.loader = Loader::NeoForge,
-                            _ => {},
-                        };
-                        if page.loader != last_loader {
-                            backend_handle.send(MessageToBackend::SetInstanceLoader {
-                                id: page.instance_id,
-                                loader: page.loader,
-                            });
-                            page.update_loader_versions(window, cx);
-                            cx.notify();
-                        }
-                    }
-                }))
-            );
+        version_content = version_content.child(Select::new(&self.loader_select_state).title_prefix("Modloader: ").w_full());
 
         if self.loader != Loader::Vanilla {
             match self.loader_versions_state {
                 TypelessFrontendMetadataResult::Loading => {
-                    basic_content = basic_content.child(crate::labelled(
-                        "Loader Version",
-                        Spinner::new()
-                    ))
+                    version_content = version_content.child(Skeleton::new().w_full().min_h_8().max_h_8().rounded_md())
                 },
                 TypelessFrontendMetadataResult::Loaded => {
-                    basic_content = basic_content.child(crate::labelled(
-                        "Loader Version",
-                        Select::new(&self.loader_version_select_state).w_full()
-                    ))
+                    version_content = version_content.child(Select::new(&self.loader_version_select_state).title_prefix(match self.loader {
+                        Loader::Fabric => "Fabric Version: ",
+                        Loader::Forge => "Forge Version: ",
+                        Loader::NeoForge => "NeoForge Version: ",
+                        Loader::Vanilla | Loader::Unknown => "Loader Version: ",
+                    }).w_full())
                 },
                 TypelessFrontendMetadataResult::Error(ref error) => {
-                    basic_content = basic_content.child(format!("Error loading possible loader versions: {}", error))
+                    version_content = version_content.child(format!("Error loading possible loader versions: {}", error))
                 },
             }
         }
+
+        basic_content = basic_content.child(crate::labelled(
+            "Version",
+            version_content,
+        ));
 
         let runtime_content = v_flex()
             .gap_4()
@@ -842,12 +840,13 @@ impl Render for InstanceSettingsSubpage {
         let sections = h_flex()
             .size_full()
             .justify_evenly()
+            .items_start()
             .p_4()
             .gap_4()
             .child(basic_content)
-            .child(div().bg(cx.theme().border).h_full().w_0p5())
+            .child(div().bg(cx.theme().border).h_full().min_w_px().max_w_px().w_px())
             .child(runtime_content)
-            .child(div().bg(cx.theme().border).h_full().w_0p5())
+            .child(div().bg(cx.theme().border).h_full().min_w_px().max_w_px().w_px())
             .child(actions_content);
 
         v_flex()
