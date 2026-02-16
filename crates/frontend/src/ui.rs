@@ -331,11 +331,9 @@ impl Render for LauncherUI {
                 let accounts = self.data.accounts.clone();
                 let backend_handle = self.data.backend_handle.clone();
                 move |_, window, cx| {
-                    /*
                     if accounts.read(cx).accounts.is_empty() {
                         crate::root::start_new_account_login(&backend_handle, window, cx);
                         return;
-                    */
                     }
 
                     let accounts = accounts.clone();
