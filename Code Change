@@ -1,0 +1,17 @@
+diff --git a/crates/frontend/src/ui.rs b/crates/frontend/src/ui.rs
+index 3807e09..dea5336 100644
+--- a/crates/frontend/src/ui.rs
++++ b/crates/frontend/src/ui.rs
+@@ -331,10 +331,12 @@ impl Render for LauncherUI {
+                 let accounts = self.data.accounts.clone();
+                 let backend_handle = self.data.backend_handle.clone();
+                 move |_, window, cx| {
++                    /*
+                     if accounts.read(cx).accounts.is_empty() {
+                         crate::root::start_new_account_login(&backend_handle, window, cx);
+                         return;
+                     }
++                    */
+ 
+                     let accounts = accounts.clone();
+                     let backend_handle = backend_handle.clone();
